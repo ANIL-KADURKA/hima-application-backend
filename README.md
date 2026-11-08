@@ -1,6 +1,7 @@
 # HIMA application backend
 
-Typed Django REST Framework backend managed with [`uv`](https://docs.astral.sh/uv/).
+Typed Django REST Framework backend managed with [`uv`](https://docs.astral.sh/uv/)
+and PostgreSQL.
 
 ## Setup
 
@@ -10,9 +11,21 @@ dependencies:
 ```shell
 uv sync
 cp .env.example .env
+docker run --name hima-postgres \
+  -e POSTGRES_DB=hima \
+  -e POSTGRES_USER=hima \
+  -e POSTGRES_PASSWORD=hima \
+  -p 5432:5432 \
+  -d postgres:16
 uv run python src/manage.py migrate
 uv run python src/manage.py runserver
 ```
+
+The Django settings load `.env` automatically. Environment variables already
+exported by the shell or CI take precedence over values in `.env`.
+
+The PostgreSQL container is only needed once; start it again with
+`docker start hima-postgres` on subsequent runs.
 
 The health endpoint is available at `GET /api/v1/health/`.
 
@@ -34,6 +47,8 @@ uv run basedpyright
 uv run mypy src
 uv run pytest
 uv run coverage run -m pytest
+uv run python src/manage.py check
+uv run python src/manage.py spectacular --file /tmp/hima-openapi.yaml --validate
 uv run bandit -c pyproject.toml -r src
 uv run pip-audit
 uv run pre-commit run --all-files

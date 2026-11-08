@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: hima
+          POSTGRES_USER: hima
+          POSTGRES_PASSWORD: hima
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U hima -d hima"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DJANGO_SECRET_KEY: ci-only-secret-key
+      DJANGO_DEBUG: "true"
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1
+      POSTGRES_DB: hima
+      POSTGRES_USER: hima
+      POSTGRES_PASSWORD: hima
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: "5432"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Ruff lint
+        run: uv run ruff check .
+
+      - name: Ruff format
+        run: uv run ruff format --check .
+
+      - name: BasedPyright
+        run: uv run basedpyright
+
+      - name: mypy
+        run: uv run mypy src
+
+      - name: Django system check
+        run: uv run python src/manage.py check
+
+      - name: Apply migrations
+        run: uv run python src/manage.py migrate --noinput
+
+      - name: OpenAPI schema validation
+        run: uv run python src/manage.py spectacular --file /tmp/hima-openapi.yaml --validate
+
+      - name: pytest
+        run: bash -c 'uv run pytest || test "$?" -eq 5'
+
+      - name: Coverage
+        run: bash -c 'uv run coverage run -m pytest || test "$?" -eq 5'
+
+      - name: Bandit
+        run: uv run bandit -c pyproject.toml -r src
+
+      - name: pip-audit
+        run: uv run pip-audit
