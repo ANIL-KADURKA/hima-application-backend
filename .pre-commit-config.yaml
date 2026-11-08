@@ -1,0 +1,45 @@
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.11.13
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: basedpyright
+        name: basedpyright
+        entry: uv run basedpyright
+        language: system
+        pass_filenames: false
+      - id: mypy
+        name: mypy
+        entry: uv run mypy src
+        language: system
+        pass_filenames: false
+      - id: pytest
+        name: pytest
+        entry: bash -c 'uv run pytest || test "$?" -eq 5'
+        language: system
+        pass_filenames: false
+      - id: django-check
+        name: Django system check
+        entry: uv run python src/manage.py check
+        language: system
+        pass_filenames: false
+      - id: openapi-schema
+        name: OpenAPI schema validation
+        entry: uv run python src/manage.py spectacular --file /tmp/hima-openapi.yaml --validate
+        language: system
+        pass_filenames: false
+      - id: bandit
+        name: bandit
+        entry: uv run bandit -c pyproject.toml -r src
+        language: system
+        pass_filenames: false
+      - id: pip-audit
+        name: pip-audit
+        entry: uv run pip-audit
+        language: system
+        pass_filenames: false
