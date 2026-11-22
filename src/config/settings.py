@@ -14,7 +14,7 @@ ALLOWED_HOSTS = [
     host.strip()
     for host in os.getenv("DJANGO_ALLOWED_HOSTS", "").split(",")
     if host.strip()
-]
+] + ["192.168.1.20"]
 
 INSTALLED_APPS = [
     "django.contrib.auth",

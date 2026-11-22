@@ -40,11 +40,16 @@ class RejectedAuthenticationService:
         raise InvalidProviderToken("The provider token is invalid.")
 
 
-def test_google_endpoint_returns_hima_session_tokens() -> None:
+def test_google_endpoint_returns_hima_session_tokens(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     client = APIClient()
-    with patch(
-        "apps.authentication.views.authentication_view._authentication_service",
-        return_value=SuccessfulAuthenticationService(),
+    with (
+        caplog.at_level(logging.INFO, logger="apps.api"),
+        patch(
+            "apps.authentication.views.authentication_view._authentication_service",
+            return_value=SuccessfulAuthenticationService(),
+        ),
     ):
         response = client.post(
             "/api/v1/auth/google/",
@@ -60,6 +65,23 @@ def test_google_endpoint_returns_hima_session_tokens() -> None:
     assert response.data["token_type"] == "Bearer"
     assert response.data["refresh_token"] == "opaque-refresh"
     assert response.data["user"]["email"] == "hima@example.com"
+    assert "Authentication request received" in caplog.text
+    assert "Request payload received" in caplog.text
+    assert "fields=('id_token', 'device_id', 'platform')" in caplog.text
+    assert (
+        "Serializer validation succeeded serializer=SignInRequestSerializer"
+        in caplog.text
+    )
+    assert (
+        "Serializer representation succeeded serializer=AuthenticatedUserSerializer"
+    ) in caplog.text
+    assert (
+        "Serializer validation succeeded serializer=TokenResponseSerializer"
+        in caplog.text
+    )
+    assert "provider-id-token" not in caplog.text
+    assert "signed-access" not in caplog.text
+    assert "opaque-refresh" not in caplog.text
 
 
 def test_google_endpoint_rejects_invalid_provider_token() -> None:
@@ -84,17 +106,24 @@ def test_google_endpoint_rejects_invalid_provider_token() -> None:
     }
 
 
-def test_validation_errors_use_the_shared_error_response() -> None:
-    response = APIClient().post(
-        "/api/v1/auth/google/",
-        {"device_id": "device-1"},
-        format="json",
-    )
+def test_validation_errors_use_the_shared_error_response(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    with caplog.at_level(logging.INFO, logger="apps.api"):
+        response = APIClient().post(
+            "/api/v1/auth/google/",
+            {"device_id": "device-1"},
+            format="json",
+        )
 
     assert response.status_code == 400
     assert response.data["error"]["code"] == "validation_error"
     assert response.data["error"]["message"] == "Request validation failed."
     assert "id_token" in response.data["error"]["details"]
+    assert (
+        "Serializer validation failed serializer=SignInRequestSerializer" in caplog.text
+    )
+    assert "error_fields=('id_token',)" in caplog.text
 
 
 def test_unexpected_api_errors_are_sanitized_and_logged(

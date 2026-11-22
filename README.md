@@ -29,6 +29,29 @@ The PostgreSQL container is only needed once; start it again with
 
 The health endpoint is available at `GET /api/v1/health/`.
 
+## Inspecting PostgreSQL with pgweb
+
+pgweb provides a browser-based interface for inspecting and querying the
+PostgreSQL database. Start it after PostgreSQL is running:
+
+```shell
+pgweb \
+  --host localhost \
+  --port 5432 \
+  --user hima \
+  --pass hima \
+  --db hima \
+  --listen 1234
+```
+
+Open `http://localhost:1234` in your browser. Replace the connection values with
+the database settings from your `.env` file if they differ from the local setup.
+
+- pgweb connects to the database on port `5432` and serves its web interface on
+  port `1234`.
+- Keep pgweb local and stop it when you are done; do not expose the database
+  administration interface or its credentials to an untrusted network.
+
 ## Authentication and users
 
 The shared PostgreSQL schema is owned by Django models and migrations in the

@@ -1,3 +1,6 @@
+import logging
+from collections.abc import Mapping
+
 from drf_spectacular.extensions import OpenApiAuthenticationExtension
 from drf_spectacular.utils import (
     OpenApiExample,
@@ -5,10 +8,12 @@ from drf_spectacular.utils import (
     extend_schema,
     extend_schema_view,
 )
+from rest_framework import serializers
 from rest_framework.exceptions import (
     APIException,
     AuthenticationFailed,
     PermissionDenied,
+    ValidationError,
 )
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.request import Request
@@ -50,6 +55,75 @@ from apps.authentication.services.impl.google_identity_verifier_impl import (
 from apps.core.serializers import ErrorResponseSerializer
 from apps.users.models import User
 from apps.users.serializers.user_serializer import AuthenticatedUserSerializer
+
+logger = logging.getLogger("apps.api")
+
+
+def _log_request_payload[SerializerData](
+    request: Request,
+    serializer: serializers.Serializer[SerializerData],
+) -> None:
+    payload = serializer.initial_data
+    expected_fields = tuple(serializer.fields)
+    if isinstance(payload, Mapping):
+        present_fields = tuple(field for field in expected_fields if field in payload)
+        unknown_field_count = max(len(payload) - len(present_fields), 0)
+        logger.info(
+            "Request payload received method=%s path=%s serializer=%s "
+            "fields=%s unknown_field_count=%s",
+            request.method,
+            request.path,
+            type(serializer).__name__,
+            present_fields,
+            unknown_field_count,
+        )
+    else:
+        logger.info(
+            "Request payload received method=%s path=%s serializer=%s payload_type=%s",
+            request.method,
+            request.path,
+            type(serializer).__name__,
+            type(payload).__name__,
+        )
+
+
+def _validation_error_fields(
+    detail: object,
+    serializer_fields: tuple[str, ...],
+) -> tuple[str, ...]:
+    if isinstance(detail, Mapping):
+        field_errors = tuple(field for field in serializer_fields if field in detail)
+        if "non_field_errors" in detail:
+            return (*field_errors, "non_field_errors")
+        return field_errors
+    return ("non_field_errors",)
+
+
+def _validate_serializer[SerializerData](
+    serializer: serializers.Serializer[SerializerData],
+) -> None:
+    serializer_name = type(serializer).__name__
+    serializer_fields = tuple(serializer.fields)
+    logger.info(
+        "Serializer validation started serializer=%s fields=%s",
+        serializer_name,
+        serializer_fields,
+    )
+    try:
+        serializer.is_valid(raise_exception=True)
+    except ValidationError as error:
+        logger.info(
+            "Serializer validation failed serializer=%s error_fields=%s",
+            serializer_name,
+            _validation_error_fields(error.detail, serializer_fields),
+        )
+        raise
+    logger.info(
+        "Serializer validation succeeded serializer=%s validated_fields=%s",
+        serializer_name,
+        tuple(serializer.validated_data),
+    )
+
 
 _TOKEN_RESPONSE_EXAMPLE = OpenApiExample(
     "HIMA session tokens",
@@ -138,14 +212,23 @@ def _session_metadata(
 
 
 def _token_response(credentials: SessionCredentials) -> Response:
-    user_data = AuthenticatedUserSerializer(
+    user_serializer = AuthenticatedUserSerializer(
         {
             "id": credentials.user_id,
             "full_name": credentials.full_name,
             "email": credentials.email,
             "phone_number": credentials.phone_number,
         }
-    ).data
+    )
+    logger.info(
+        "Serializer representation started serializer=AuthenticatedUserSerializer"
+    )
+    user_data = user_serializer.data
+    logger.info(
+        "Serializer representation succeeded serializer=AuthenticatedUserSerializer "
+        "fields=%s",
+        tuple(user_data),
+    )
     body = {
         "token_type": "Bearer",  # nosec B105
         "access_token": credentials.access_token,
@@ -155,7 +238,7 @@ def _token_response(credentials: SessionCredentials) -> Response:
         "user": user_data,
     }
     serializer = TokenResponseSerializer(data=body)
-    serializer.is_valid(raise_exception=True)
+    _validate_serializer(serializer)
     return Response(serializer.validated_data)
 
 
@@ -204,8 +287,19 @@ class ProviderSignInView(APIView):
         tags=["authentication"],
     )
     def post(self, request: Request) -> Response:
+        logger.info(
+            "Authentication request received method=%s path=%s provider=%s",
+            request.method,
+            request.path,
+            self.provider,
+        )
         serializer = SignInRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        _log_request_payload(request, serializer)
+        _validate_serializer(serializer)
+        logger.info(
+            "Authentication service started operation=sign_in provider=%s",
+            self.provider,
+        )
         try:
             credentials = _authentication_service().sign_in(
                 provider=self.provider,
@@ -213,13 +307,37 @@ class ProviderSignInView(APIView):
                 metadata=_session_metadata(request, serializer.validated_data),
             )
         except InvalidProviderToken as error:
+            logger.info(
+                "Authentication service failed operation=sign_in provider=%s error=%s",
+                self.provider,
+                type(error).__name__,
+            )
             raise InvalidProviderTokenAPIException(str(error)) from error
         except AccountUnavailable as error:
+            logger.info(
+                "Authentication service failed operation=sign_in provider=%s error=%s",
+                self.provider,
+                type(error).__name__,
+            )
             raise PermissionDenied(str(error)) from error
         except IdentityLinkConflict as error:
+            logger.info(
+                "Authentication service failed operation=sign_in provider=%s error=%s",
+                self.provider,
+                type(error).__name__,
+            )
             raise IdentityLinkConflictAPIException(str(error)) from error
         except (IdentityProviderUnavailable, ProviderNotConfigured) as error:
+            logger.info(
+                "Authentication service failed operation=sign_in provider=%s error=%s",
+                self.provider,
+                type(error).__name__,
+            )
             raise IdentityProviderUnavailableAPIException(str(error)) from error
+        logger.info(
+            "Authentication service succeeded operation=sign_in provider=%s",
+            self.provider,
+        )
         return _token_response(credentials)
 
 
@@ -286,14 +404,26 @@ class RefreshTokenView(APIView):
         tags=["authentication"],
     )
     def post(self, request: Request) -> Response:
+        logger.info(
+            "Authentication request received method=%s path=%s operation=refresh",
+            request.method,
+            request.path,
+        )
         serializer = RefreshRequestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        _log_request_payload(request, serializer)
+        _validate_serializer(serializer)
+        logger.info("Authentication service started operation=refresh")
         try:
             credentials = _authentication_service().refresh(
                 serializer.validated_data["refresh_token"]
             )
         except RefreshTokenRejected as error:
+            logger.info(
+                "Authentication service failed operation=refresh error=%s",
+                type(error).__name__,
+            )
             raise AuthenticationFailed(str(error)) from error
+        logger.info("Authentication service succeeded operation=refresh")
         return _token_response(credentials)
 
 
