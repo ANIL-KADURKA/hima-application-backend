@@ -20,4 +20,6 @@ urlpatterns = [
         name="redoc",
     ),
     path("api/v1/", include("apps.core.urls")),
+    path("api/v1/auth/", include("apps.authentication.urls")),
+    path("api/v1/users/", include("apps.users.urls")),
 ]

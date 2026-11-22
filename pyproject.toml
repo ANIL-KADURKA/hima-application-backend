@@ -8,6 +8,8 @@ dependencies = [
     "Django>=5.2,<6.0",
     "djangorestframework>=3.16,<4.0",
     "drf-spectacular>=0.28,<1.0",
+    "firebase-admin>=6.8,<8.0",
+    "google-auth>=2.40,<3.0",
     "psycopg[binary]>=3.2,<4.0",
     "python-dotenv>=1.1,<2.0",
 ]
@@ -79,7 +81,7 @@ skip_empty = true
 
 [tool.bandit]
 targets = ["src"]
-exclude_dirs = ["migrations"]
+exclude_dirs = ["migrations", "tests"]
 
 [build-system]
 requires = ["uv_build>=0.7.0,<0.8.0"]
